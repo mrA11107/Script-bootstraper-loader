@@ -80,45 +80,43 @@ GetKeyBtn.MouseButton1Click:Connect(function()
 end)
 
 SubmitBtn.MouseButton1Click:Connect(function()
-    -- Automatically strip out random trailing spaces/newlines from copy-pasting
     local enteredKey = KeyInput.Text:match("^%s*(.-)%s*$")
     
     if enteredKey and enteredKey ~= "" then
         SubmitBtn.Text = "Checking database..."
         
-        -- Map the key globally across all potential registries
         getgenv().script_key = enteredKey
         _G.script_key = enteredKey
         shared.script_key = enteredKey
         
         task.spawn(function()
-            local success, result = pcall(function()
-                -- 1. Download the raw code as a string data packet
-                local rawCode = game:HttpGet("https://api.luarmor.net/files/v4/loaders/68446446b71a27c44974258a58424e4c.lua")
-                
-                -- 2. Compile it locally into an executable function
-                local compiledFunction, compileError = loadstring(rawCode)
-                
-                if compiledFunction then
-                    -- 3. ENVIRONMENT BRIDGE: Force the compiled code to look inside our current environment
-                    setfenv(compiledFunction, getfenv())
-                    
-                    -- 4. Execute safely
-                    compiledFunction()
-                    return true
-                else
-                    return false
-                end
+            local rawCode
+            local success, err = pcall(function()
+                rawCode = game:HttpGet("https://api.luarmor.net/files/v4/loaders/68446446b71a27c44974258a58424e4c.lua")
             end)
             
-            if success and result then
-                SubmitBtn.Text = "Success! Loading..."
-                task.wait(0.5)
+            if not success or not rawCode then
+                SubmitBtn.Text = "Connection Error"
+                task.wait(2)
+                SubmitBtn.Text = "Verify & Load Script"
+                return
+            end
+            
+            local compiledFunction = loadstring(rawCode)
+            if compiledFunction then
+                setfenv(compiledFunction, getfenv())
+                
+                -- THE FIX: Clear out the bootstrapper UI right before running the main execution thread
+                SubmitBtn.Text = "Success!"
+                task.wait(0.2)
                 if ScreenGui then
                     ScreenGui:Destroy()
                 end
+                
+                -- Hand over full execution to Luarmor/Main Script
+                compiledFunction()
             else
-                SubmitBtn.Text = "Access Denied! Bad Key."
+                SubmitBtn.Text = "Compilation Error"
                 task.wait(2)
                 SubmitBtn.Text = "Verify & Load Script"
             end
