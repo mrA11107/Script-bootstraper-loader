@@ -80,22 +80,47 @@ GetKeyBtn.MouseButton1Click:Connect(function()
 end)
 
 SubmitBtn.MouseButton1Click:Connect(function()
-    local enteredKey = KeyInput.Text
-    if enteredKey ~= "" then
+    -- Automatically strip out random trailing spaces/newlines from copy-pasting
+    local enteredKey = KeyInput.Text:match("^%s*(.-)%s*$")
+    
+    if enteredKey and enteredKey ~= "" then
         SubmitBtn.Text = "Checking database..."
         
-        -- THE FIX: Set the exact variable Luarmor expects globally
+        -- Map the key globally across all potential registries
         getgenv().script_key = enteredKey
         _G.script_key = enteredKey
+        shared.script_key = enteredKey
         
         task.spawn(function()
-            -- Run your Luarmor loader link
-            loadstring(game:HttpGet("https://api.luarmor.net/files/v4/loaders/68446446b71a27c44974258a58424e4c.lua"))()
+            local success, result = pcall(function()
+                -- 1. Download the raw code as a string data packet
+                local rawCode = game:HttpGet("https://api.luarmor.net/files/v4/loaders/68446446b71a27c44974258a58424e4c.lua")
+                
+                -- 2. Compile it locally into an executable function
+                local compiledFunction, compileError = loadstring(rawCode)
+                
+                if compiledFunction then
+                    -- 3. ENVIRONMENT BRIDGE: Force the compiled code to look inside our current environment
+                    setfenv(compiledFunction, getfenv())
+                    
+                    -- 4. Execute safely
+                    compiledFunction()
+                    return true
+                else
+                    return false
+                end
+            end)
             
-            -- If it didn't kick you out, the key passed! Safely clean up the UI frame.
-            task.wait(0.5)
-            if ScreenGui then
-                ScreenGui:Destroy()
+            if success and result then
+                SubmitBtn.Text = "Success! Loading..."
+                task.wait(0.5)
+                if ScreenGui then
+                    ScreenGui:Destroy()
+                end
+            else
+                SubmitBtn.Text = "Access Denied! Bad Key."
+                task.wait(2)
+                SubmitBtn.Text = "Verify & Load Script"
             end
         end)
     end
