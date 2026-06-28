@@ -84,21 +84,19 @@ SubmitBtn.MouseButton1Click:Connect(function()
     if enteredKey ~= "" then
         SubmitBtn.Text = "Checking database..."
         
-        -- Assign the user's input key directly to the global variable Luarmor reads
-        _G.LuarmorKey = enteredKey
+        -- THE FIX: Set the exact variable Luarmor expects globally
+        getgenv().script_key = enteredKey
+        _G.script_key = enteredKey
         
-        -- Run your Luarmor script check safely
-        local success, err = pcall(function()
+        task.spawn(function()
+            -- Run your Luarmor loader link
             loadstring(game:HttpGet("https://api.luarmor.net/files/v4/loaders/68446446b71a27c44974258a58424e4c.lua"))()
+            
+            -- If it didn't kick you out, the key passed! Safely clean up the UI frame.
+            task.wait(0.5)
+            if ScreenGui then
+                ScreenGui:Destroy()
+            end
         end)
-        
-        -- If the key works, Luarmor passes successfully, and success is true
-        if success then
-            ScreenGui:Destroy()
-        else
-            SubmitBtn.Text = "Access Denied! Bad Key."
-            task.wait(2)
-            SubmitBtn.Text = "Verify & Load Script"
-        end
     end
 end)
