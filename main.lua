@@ -84,7 +84,7 @@ SubmitBtn.MouseButton1Click:Connect(function()
     
     if enteredKey and enteredKey ~= "" then
         SubmitBtn.Text = "Checking database..."
-        SubmitBtn.BackgroundColor3 = Color3.fromRGB(41, 128, 185) -- Changes to neutral blue while checking
+        SubmitBtn.BackgroundColor3 = Color3.fromRGB(41, 128, 185)
         
         getgenv().script_key = enteredKey
         _G.script_key = enteredKey
@@ -107,50 +107,103 @@ SubmitBtn.MouseButton1Click:Connect(function()
             
             local compiledFunction = loadstring(rawCode)
             if compiledFunction then
-                setfenv(compiledFunction, getfenv())
-                
-                -- INTERCEPTION LAYER: Setup temporary anti-kick tracking
-                local LocalPlayer = game:GetService("Players").LocalPlayer
+                -- DETECTOR-PROOF INTERCEPTION LAYER
+                local realGame = game
+                local realPlayers = realGame:GetService("Players")
+                local realLocalPlayer = realPlayers.LocalPlayer
                 local authFailed = false
-                local oldKick
                 
-                if hookfunction then
-                    oldKick = hookfunction(LocalPlayer.Kick, function(self, reason)
-                        authFailed = true
-                        return -- Blocks the kick from executing
-                    end)
-                end
-                
-                -- Execute Luarmor completely sandboxed to check response
-                task.spawn(function()
-                    local success, runError = pcall(compiledFunction)
-                    if not success then
-                        authFailed = true
+                -- Construct invisible environment proxies
+                local fakeLocalPlayer = setmetatable({}, {
+                    __index = function(t, key)
+                        if key == "Kick" or key == "kick" then
+                            return function(self, reason)
+                                authFailed = true -- Silently catches the authentication failure
+                                return
+                            end
+                        end
+                        local realVal = realLocalPlayer[key]
+                        if type(realVal) == "function" then
+                            return function(self, ...)
+                                return realVal(realLocalPlayer, unpack({...}))
+                            end
+                        end
+                        return realVal
                     end
+                })
+                
+                local fakePlayers = setmetatable({}, {
+                    __index = function(t, key)
+                        if key == "LocalPlayer" then
+                            return fakeLocalPlayer
+                        end
+                        local realVal = realPlayers[key]
+                        if type(realVal) == "function" then
+                            return function(self, ...)
+                                return realVal(realPlayers, unpack({...}))
+                            end
+                        end
+                        return realVal
+                    end
+                })
+                
+                local fakeGame = setmetatable({}, {
+                    __index = function(t, key)
+                        if key == "Players" then
+                            return fakePlayers
+                        end
+                        if key == "GetService" or key == "getService" then
+                            return function(self, service)
+                                if service == "Players" then return fakePlayers end
+                                return realGame:GetService(service)
+                            end
+                        end
+                        local realVal = realGame[key]
+                        if type(realVal) == "function" then
+                            return function(self, ...)
+                                local passedArgs = {...}
+                                local cleanSelf = (self == t) and realGame or self
+                                return realVal(cleanSelf, unpack(passedArgs))
+                            end
+                        end
+                        return realVal
+                    end
+                })
+                
+                -- Merge spoofed tables directly into code scope environment
+                local customEnv = setmetatable({}, {
+                    __index = function(t, key)
+                        if key == "game" or key == "Game" then return fakeGame end
+                        return getfenv()[key]
+                    end,
+                    __newindex = function(t, key, val)
+                        getfenv()[key] = val
+                    end
+                })
+                
+                setfenv(compiledFunction, customEnv)
+                
+                -- Execute Luarmor securely inside our proxy sandbox
+                task.spawn(function()
+                    pcall(compiledFunction)
                 end)
                 
-                -- Monitor verification state over a brief window
-                local verifyTimer = 0
-                while verifyTimer < 2.5 do
+                -- Monitor response status loop
+                local checkTimer = 0
+                while checkTimer < 2.0 do
                     task.wait(0.1)
-                    verifyTimer = verifyTimer + 0.1
+                    checkTimer = checkTimer + 0.1
                     if authFailed then break end
                 end
                 
-                -- Restore original native kick functionality 
-                if oldKick and hookfunction then
-                    hookfunction(LocalPlayer.Kick, oldKick)
-                end
-                
-                -- 3. Handle Evaluation Outcome
+                -- Handle evaluation outcome
                 if authFailed then
                     SubmitBtn.Text = "Invalid Key! Try Again."
-                    SubmitBtn.BackgroundColor3 = Color3.fromRGB(192, 41, 43) -- Changes button to solid red
+                    SubmitBtn.BackgroundColor3 = Color3.fromRGB(192, 41, 43)
                     task.wait(2)
                     SubmitBtn.Text = "Verify & Load Script"
-                    SubmitBtn.BackgroundColor3 = Color3.fromRGB(46, 204, 113) -- Resets to green
+                    SubmitBtn.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
                 else
-                    -- Passed! Key is completely valid, close authentication UI frame
                     SubmitBtn.Text = "Success!"
                     task.wait(0.2)
                     if ScreenGui then
