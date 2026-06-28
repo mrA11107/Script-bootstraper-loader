@@ -1,8 +1,9 @@
 -- ========================================================
--- mrA Hub — Custom Key Gateway & Bootstrapper Loader
+-- mrA Hub — Custom Key Gateway with Metatable Kick-Shield
 -- ========================================================
 
 local LOOTLABS_LINK = "https://ads.luarmor.net/get_key?for=mrAs_checkpoint-XUglkDZkjcPu"
+local KEY_FILE = "mra_hub_key.txt"
 
 -- 1. Create the UI Core
 local ScreenGui = Instance.new("ScreenGui")
@@ -67,7 +68,114 @@ SubmitBtn.TextSize = 14
 SubmitBtn.Parent = MainFrame
 Instance.new("UICorner", SubmitBtn).CornerRadius = UDim.new(0, 6)
 
--- 2. Setup Operational Event Triggers
+-- 2. Main Verification Engine
+local function verifyKey(enteredKey)
+    SubmitBtn.Text = "Checking database..."
+    SubmitBtn.BackgroundColor3 = Color3.fromRGB(41, 128, 185)
+    
+    getgenv().script_key = enteredKey
+    _G.script_key = enteredKey
+    shared.script_key = enteredKey
+    
+    task.spawn(function()
+        local rawCode
+        pcall(function()
+            rawCode = game:HttpGet("https://api.luarmor.net/files/v4/loaders/68446446b71a27c44974258a58424e4c.lua")
+        end)
+        
+        if not rawCode then
+            SubmitBtn.Text = "Connection Error"
+            SubmitBtn.BackgroundColor3 = Color3.fromRGB(192, 41, 43)
+            task.wait(2)
+            SubmitBtn.Text = "Verify & Load Script"
+            SubmitBtn.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
+            return
+        end
+        
+        local compiledFunction = loadstring(rawCode)
+        if compiledFunction then
+            
+            -- ====================================================
+            -- ENGINE SHIELD: Global Metatable Interception
+            -- ====================================================
+            _G.mrA_BlockKick = true
+            _G.mrA_KickTriggered = false
+            
+            local oldNamecall, oldIndex
+            pcall(function()
+                if hookmetamethod and newcclosure then
+                    -- Intercept player:Kick() string queries
+                    oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+                        local method = getnamecallmethod()
+                        if (method == "Kick" or method == "kick") and _G.mrA_BlockKick then
+                            _G.mrA_KickTriggered = true
+                            return nil -- Absorbs and kills the call completely
+                        end
+                        return oldNamecall(self, ...)
+                    end))
+                    
+                    -- Intercept player.Kick(player) functional queries
+                    oldIndex = hookmetamethod(game, "__index", newcclosure(function(self, key)
+                        if (key == "Kick" or key == "kick") and _G.mrA_BlockKick then
+                            return newcclosure(function()
+                                _G.mrA_KickTriggered = true
+                                return nil
+                            end)
+                        end
+                        return oldIndex(self, key)
+                    end))
+                end
+            end)
+            -- ====================================================
+            
+            -- Run the Luarmor verification script
+            task.spawn(function()
+                pcall(compiledFunction)
+            end)
+            
+            -- Monitor validation state loop
+            local checkTimer = 0
+            while checkTimer < 2.5 do
+                task.wait(0.1)
+                checkTimer = checkTimer + 0.1
+                if _G.mrA_KickTriggered then break end
+            end
+            
+            -- Lower the safety shields immediately so normal game elements work safely
+            _G.mrA_BlockKick = false
+            
+            if _G.mrA_KickTriggered then
+                -- Key expired / over: Safe self-destruct sequence execution
+                if isfile and delfile and isfile(KEY_FILE) then
+                    delfile(KEY_FILE)
+                end
+                
+                SubmitBtn.Text = "Invalid Key! Try Again."
+                SubmitBtn.BackgroundColor3 = Color3.fromRGB(192, 41, 43)
+                task.wait(2)
+                SubmitBtn.Text = "Verify & Load Script"
+                SubmitBtn.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
+            else
+                -- Passed completely: Save the key profile configuration locally
+                if writefile then
+                    writefile(KEY_FILE, enteredKey)
+                end
+                
+                SubmitBtn.Text = "Success!"
+                task.wait(0.2)
+                if ScreenGui then
+                    ScreenGui:Destroy()
+                end
+            end
+        else
+            SubmitBtn.Text = "Compilation Error"
+            task.wait(2)
+            SubmitBtn.Text = "Verify & Load Script"
+        end
+    end)
+end
+
+-- 3. Click Event Handlers
 GetKeyBtn.MouseButton1Click:Connect(function()
     if setclipboard then
         setclipboard(LOOTLABS_LINK)
@@ -81,140 +189,18 @@ end)
 
 SubmitBtn.MouseButton1Click:Connect(function()
     local enteredKey = KeyInput.Text:match("^%s*(.-)%s*$")
-    
     if enteredKey and enteredKey ~= "" then
-        SubmitBtn.Text = "Checking database..."
-        SubmitBtn.BackgroundColor3 = Color3.fromRGB(41, 128, 185)
-        
-        getgenv().script_key = enteredKey
-        _G.script_key = enteredKey
-        shared.script_key = enteredKey
-        
-        task.spawn(function()
-            local rawCode
-            pcall(function()
-                rawCode = game:HttpGet("https://api.luarmor.net/files/v4/loaders/68446446b71a27c44974258a58424e4c.lua")
-            end)
-            
-            if not rawCode then
-                SubmitBtn.Text = "Connection Error"
-                SubmitBtn.BackgroundColor3 = Color3.fromRGB(192, 41, 43)
-                task.wait(2)
-                SubmitBtn.Text = "Verify & Load Script"
-                SubmitBtn.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
-                return
-            end
-            
-            local compiledFunction = loadstring(rawCode)
-            if compiledFunction then
-                -- DETECTOR-PROOF INTERCEPTION LAYER
-                local realGame = game
-                local realPlayers = realGame:GetService("Players")
-                local realLocalPlayer = realPlayers.LocalPlayer
-                local authFailed = false
-                
-                -- Construct invisible environment proxies
-                local fakeLocalPlayer = setmetatable({}, {
-                    __index = function(t, key)
-                        if key == "Kick" or key == "kick" then
-                            return function(self, reason)
-                                authFailed = true -- Silently catches the authentication failure
-                                return
-                            end
-                        end
-                        local realVal = realLocalPlayer[key]
-                        if type(realVal) == "function" then
-                            return function(self, ...)
-                                return realVal(realLocalPlayer, unpack({...}))
-                            end
-                        end
-                        return realVal
-                    end
-                })
-                
-                local fakePlayers = setmetatable({}, {
-                    __index = function(t, key)
-                        if key == "LocalPlayer" then
-                            return fakeLocalPlayer
-                        end
-                        local realVal = realPlayers[key]
-                        if type(realVal) == "function" then
-                            return function(self, ...)
-                                return realVal(realPlayers, unpack({...}))
-                            end
-                        end
-                        return realVal
-                    end
-                })
-                
-                local fakeGame = setmetatable({}, {
-                    __index = function(t, key)
-                        if key == "Players" then
-                            return fakePlayers
-                        end
-                        if key == "GetService" or key == "getService" then
-                            return function(self, service)
-                                if service == "Players" then return fakePlayers end
-                                return realGame:GetService(service)
-                            end
-                        end
-                        local realVal = realGame[key]
-                        if type(realVal) == "function" then
-                            return function(self, ...)
-                                local passedArgs = {...}
-                                local cleanSelf = (self == t) and realGame or self
-                                return realVal(cleanSelf, unpack(passedArgs))
-                            end
-                        end
-                        return realVal
-                    end
-                })
-                
-                -- Merge spoofed tables directly into code scope environment
-                local customEnv = setmetatable({}, {
-                    __index = function(t, key)
-                        if key == "game" or key == "Game" then return fakeGame end
-                        return getfenv()[key]
-                    end,
-                    __newindex = function(t, key, val)
-                        getfenv()[key] = val
-                    end
-                })
-                
-                setfenv(compiledFunction, customEnv)
-                
-                -- Execute Luarmor securely inside our proxy sandbox
-                task.spawn(function()
-                    pcall(compiledFunction)
-                end)
-                
-                -- Monitor response status loop
-                local checkTimer = 0
-                while checkTimer < 2.0 do
-                    task.wait(0.1)
-                    checkTimer = checkTimer + 0.1
-                    if authFailed then break end
-                end
-                
-                -- Handle evaluation outcome
-                if authFailed then
-                    SubmitBtn.Text = "Invalid Key! Try Again."
-                    SubmitBtn.BackgroundColor3 = Color3.fromRGB(192, 41, 43)
-                    task.wait(2)
-                    SubmitBtn.Text = "Verify & Load Script"
-                    SubmitBtn.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
-                else
-                    SubmitBtn.Text = "Success!"
-                    task.wait(0.2)
-                    if ScreenGui then
-                        ScreenGui:Destroy()
-                    end
-                end
-            else
-                SubmitBtn.Text = "Compilation Error"
-                task.wait(2)
-                SubmitBtn.Text = "Verify & Load Script"
-            end
-        end)
+        verifyKey(enteredKey)
     end
 end)
+
+-- 4. Auto-Load Verification Setup Check on Boot
+if isfile and readfile and isfile(KEY_FILE) then
+    local savedKey = readfile(KEY_FILE):match("^%s*(.-)%s*$")
+    if savedKey and savedKey ~= "" then
+        KeyInput.Text = savedKey
+        task.spawn(function()
+            verifyKey(savedKey)
+        end)
+    end
+end
