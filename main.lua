@@ -84,6 +84,7 @@ SubmitBtn.MouseButton1Click:Connect(function()
     
     if enteredKey and enteredKey ~= "" then
         SubmitBtn.Text = "Checking database..."
+        SubmitBtn.BackgroundColor3 = Color3.fromRGB(41, 128, 185) -- Changes to neutral blue while checking
         
         getgenv().script_key = enteredKey
         _G.script_key = enteredKey
@@ -91,14 +92,16 @@ SubmitBtn.MouseButton1Click:Connect(function()
         
         task.spawn(function()
             local rawCode
-            local success, err = pcall(function()
+            pcall(function()
                 rawCode = game:HttpGet("https://api.luarmor.net/files/v4/loaders/68446446b71a27c44974258a58424e4c.lua")
             end)
             
-            if not success or not rawCode then
+            if not rawCode then
                 SubmitBtn.Text = "Connection Error"
+                SubmitBtn.BackgroundColor3 = Color3.fromRGB(192, 41, 43)
                 task.wait(2)
                 SubmitBtn.Text = "Verify & Load Script"
+                SubmitBtn.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
                 return
             end
             
@@ -106,15 +109,54 @@ SubmitBtn.MouseButton1Click:Connect(function()
             if compiledFunction then
                 setfenv(compiledFunction, getfenv())
                 
-                -- THE FIX: Clear out the bootstrapper UI right before running the main execution thread
-                SubmitBtn.Text = "Success!"
-                task.wait(0.2)
-                if ScreenGui then
-                    ScreenGui:Destroy()
+                -- INTERCEPTION LAYER: Setup temporary anti-kick tracking
+                local LocalPlayer = game:GetService("Players").LocalPlayer
+                local authFailed = false
+                local oldKick
+                
+                if hookfunction then
+                    oldKick = hookfunction(LocalPlayer.Kick, function(self, reason)
+                        authFailed = true
+                        return -- Blocks the kick from executing
+                    end)
                 end
                 
-                -- Hand over full execution to Luarmor/Main Script
-                compiledFunction()
+                -- Execute Luarmor completely sandboxed to check response
+                task.spawn(function()
+                    local success, runError = pcall(compiledFunction)
+                    if not success then
+                        authFailed = true
+                    end
+                end)
+                
+                -- Monitor verification state over a brief window
+                local verifyTimer = 0
+                while verifyTimer < 2.5 do
+                    task.wait(0.1)
+                    verifyTimer = verifyTimer + 0.1
+                    if authFailed then break end
+                end
+                
+                -- Restore original native kick functionality 
+                if oldKick and hookfunction then
+                    hookfunction(LocalPlayer.Kick, oldKick)
+                end
+                
+                -- 3. Handle Evaluation Outcome
+                if authFailed then
+                    SubmitBtn.Text = "Invalid Key! Try Again."
+                    SubmitBtn.BackgroundColor3 = Color3.fromRGB(192, 41, 43) -- Changes button to solid red
+                    task.wait(2)
+                    SubmitBtn.Text = "Verify & Load Script"
+                    SubmitBtn.BackgroundColor3 = Color3.fromRGB(46, 204, 113) -- Resets to green
+                else
+                    -- Passed! Key is completely valid, close authentication UI frame
+                    SubmitBtn.Text = "Success!"
+                    task.wait(0.2)
+                    if ScreenGui then
+                        ScreenGui:Destroy()
+                    end
+                end
             else
                 SubmitBtn.Text = "Compilation Error"
                 task.wait(2)
