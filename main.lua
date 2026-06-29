@@ -1,12 +1,20 @@
 -- ========================================================
--- mrA Hub — Custom Key Gateway with Metatable Kick-Shield
+-- mrA Hub — Safe Custom Key Gateway (Auto-Login)
 -- ========================================================
 
+local CoreGui = game:GetService("CoreGui")
 local LOOTLABS_LINK = "https://ads.luarmor.net/get_key?for=mrAs_checkpoint-XUglkDZkjcPu"
 local KEY_FILE = "mra_hub_key.txt"
+local LUARMOR_LOADER = "https://api.luarmor.net/files/v4/loaders/68446446b71a27c44974258a58424e4c.lua"
 
 -- 1. Create the UI Core
+local guiName = "mrA_Hub_Bootstrapper"
+if CoreGui:FindFirstChild(guiName) then CoreGui[guiName]:Destroy() end
+
 local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = guiName
+ScreenGui.Parent = CoreGui
+
 local MainFrame = Instance.new("Frame")
 local TitleLabel = Instance.new("TextLabel")
 local KeyInput = Instance.new("TextBox")
@@ -15,15 +23,11 @@ local SubmitBtn = Instance.new("TextButton")
 local UIListLayout = Instance.new("UIListLayout")
 local UICorner = Instance.new("UICorner")
 
-ScreenGui.Parent = game:GetService("CoreGui")
-ScreenGui.Name = "mrA_Hub_Bootstrapper"
-
 MainFrame.Parent = ScreenGui
 MainFrame.Size = UDim2.new(0, 320, 0, 240)
 MainFrame.Position = UDim2.new(0.5, -160, 0.5, -120)
 MainFrame.BackgroundColor3 = Color3.fromRGB(24, 24, 32)
 MainFrame.BorderSizePixel = 0
-
 UICorner.CornerRadius = UDim.new(0, 8)
 UICorner.Parent = MainFrame
 
@@ -68,109 +72,32 @@ SubmitBtn.TextSize = 14
 SubmitBtn.Parent = MainFrame
 Instance.new("UICorner", SubmitBtn).CornerRadius = UDim.new(0, 6)
 
--- 2. Main Verification Engine
+-- 2. Clean Verification Engine
 local function verifyKey(enteredKey)
-    SubmitBtn.Text = "Checking database..."
+    SubmitBtn.Text = "Loading mrA Hub..."
     SubmitBtn.BackgroundColor3 = Color3.fromRGB(41, 128, 185)
     
-    getgenv().script_key = enteredKey
-    _G.script_key = enteredKey
-    shared.script_key = enteredKey
+    -- Save the key for next time
+    if writefile then
+        pcall(function() writefile(KEY_FILE, enteredKey) end)
+    end
     
+    -- Inject the key so Luarmor sees it
+    getgenv().script_key = enteredKey
+    
+    -- Hide our custom UI
+    ScreenGui:Destroy()
+    
+    -- Execute Luarmor safely
     task.spawn(function()
-        local rawCode
-        pcall(function()
-            rawCode = game:HttpGet("https://api.luarmor.net/files/v4/loaders/68446446b71a27c44974258a58424e4c.lua")
+        local success, err = pcall(function()
+            loadstring(game:HttpGet(LUARMOR_LOADER))()
         end)
         
-        if not rawCode then
-            SubmitBtn.Text = "Connection Error"
-            SubmitBtn.BackgroundColor3 = Color3.fromRGB(192, 41, 43)
-            task.wait(2)
-            SubmitBtn.Text = "Verify & Load Script"
-            SubmitBtn.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
-            return
-        end
-        
-        local compiledFunction = loadstring(rawCode)
-        if compiledFunction then
-            
-            -- ====================================================
-            -- ENGINE SHIELD: Global Metatable Interception
-            -- ====================================================
-            _G.mrA_BlockKick = true
-            _G.mrA_KickTriggered = false
-            
-            local oldNamecall, oldIndex
-            pcall(function()
-                if hookmetamethod and newcclosure then
-                    -- Intercept player:Kick() string queries
-                    oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
-                        local method = getnamecallmethod()
-                        if (method == "Kick" or method == "kick") and _G.mrA_BlockKick then
-                            _G.mrA_KickTriggered = true
-                            return nil -- Absorbs and kills the call completely
-                        end
-                        return oldNamecall(self, ...)
-                    end))
-                    
-                    -- Intercept player.Kick(player) functional queries
-                    oldIndex = hookmetamethod(game, "__index", newcclosure(function(self, key)
-                        if (key == "Kick" or key == "kick") and _G.mrA_BlockKick then
-                            return newcclosure(function()
-                                _G.mrA_KickTriggered = true
-                                return nil
-                            end)
-                        end
-                        return oldIndex(self, key)
-                    end))
-                end
-            end)
-            -- ====================================================
-            
-            -- Run the Luarmor verification script
-            task.spawn(function()
-                pcall(compiledFunction)
-            end)
-            
-            -- Monitor validation state loop
-            local checkTimer = 0
-            while checkTimer < 2.5 do
-                task.wait(0.1)
-                checkTimer = checkTimer + 0.1
-                if _G.mrA_KickTriggered then break end
-            end
-            
-            -- Lower the safety shields immediately so normal game elements work safely
-            _G.mrA_BlockKick = false
-            
-            if _G.mrA_KickTriggered then
-                -- Key expired / over: Safe self-destruct sequence execution
-                if isfile and delfile and isfile(KEY_FILE) then
-                    delfile(KEY_FILE)
-                end
-                
-                SubmitBtn.Text = "Invalid Key! Try Again."
-                SubmitBtn.BackgroundColor3 = Color3.fromRGB(192, 41, 43)
-                task.wait(2)
-                SubmitBtn.Text = "Verify & Load Script"
-                SubmitBtn.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
-            else
-                -- Passed completely: Save the key profile configuration locally
-                if writefile then
-                    writefile(KEY_FILE, enteredKey)
-                end
-                
-                SubmitBtn.Text = "Success!"
-                task.wait(0.2)
-                if ScreenGui then
-                    ScreenGui:Destroy()
-                end
-            end
-        else
-            SubmitBtn.Text = "Compilation Error"
-            task.wait(2)
-            SubmitBtn.Text = "Verify & Load Script"
+        -- If they put in a completely fake/wrong key, Luarmor will natively handle it 
+        -- and popup its own "Invalid Key" message without crashing the game.
+        if not success then
+            warn("[mrA Hub Bootstrapper] Failed to load Luarmor script: " .. tostring(err))
         end
     end)
 end
@@ -183,7 +110,9 @@ GetKeyBtn.MouseButton1Click:Connect(function()
         task.wait(1.5)
         GetKeyBtn.Text = "Get Key (Copy Link)"
     else
-        GetKeyBtn.Text = "Clipboard function blocked"
+        GetKeyBtn.Text = "Error: Executor blocked clipboard"
+        task.wait(1.5)
+        GetKeyBtn.Text = "Get Key (Copy Link)"
     end
 end)
 
@@ -194,13 +123,14 @@ SubmitBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- 4. Auto-Load Verification Setup Check on Boot
+-- 4. Auto-Load Setup
 if isfile and readfile and isfile(KEY_FILE) then
-    local savedKey = readfile(KEY_FILE):match("^%s*(.-)%s*$")
+    local savedKey = ""
+    pcall(function() savedKey = readfile(KEY_FILE):match("^%s*(.-)%s*$") end)
+    
     if savedKey and savedKey ~= "" then
         KeyInput.Text = savedKey
-        task.spawn(function()
-            verifyKey(savedKey)
-        end)
+        -- Automatically try to load if a key is already saved
+        verifyKey(savedKey)
     end
 end
